@@ -1,7 +1,7 @@
 // Erzeugt Fotodokumentation und Baubeschreibung als Word-Dokument (.docx).
 // Die Dateien werden direkt als WordprocessingML geschrieben und mit JSZip gepackt.
 import { freeCanvas } from './markup.js';
-import { BAUBESCHREIBUNG, ausstattungsstandard, modernisierung, fotoKategorie, fotoText, sortiereFotos } from './schema.js';
+import { BAUBESCHREIBUNG, ausstattungsstandard, modernisierung, fotoText, sortiereFotos } from './schema.js';
 
 export function formatDatum(iso) {
   if (!iso) return '';
@@ -99,7 +99,7 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="240"/></w:pPr><w:rPr><w:sz w:val="24"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="360" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="280" w:after="100"/><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style>
-<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="60" w:after="280"/></w:pPr><w:rPr><w:sz w:val="19"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="60" w:after="220"/></w:pPr><w:rPr><w:sz w:val="19"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:pPr><w:tabs><w:tab w:val="right" w:pos="${CONTENT_TW}"/></w:tabs><w:spacing w:after="0"/></w:pPr><w:rPr><w:color w:val="7F7F7F"/><w:sz w:val="16"/></w:rPr></w:style>
 <w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>
 </w:styles>`;
@@ -142,7 +142,7 @@ ${imgRels}
 <w:ftr ${NS}><w:p><w:pPr><w:pStyle w:val="Footer"/><w:pBdr><w:top w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/></w:pBdr></w:pPr>
 ${run(footerText)}<w:r><w:tab/></w:r>${run('Seite ')}${field('PAGE', '1')}${run(' von ')}${field('NUMPAGES', '1')}</w:p></w:ftr>`);
   zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document ${NS}><w:body>${bodyXml}<w:p/>
+<w:document ${NS}><w:body>${bodyXml}<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>
 <w:sectPr><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/>
 <w:pgMar w:top="1418" w:right="1418" w:bottom="1418" w:left="1418" w:header="709" w:footer="567" w:gutter="0"/></w:sectPr>
 </w:body></w:document>`);
@@ -206,53 +206,47 @@ function captionPara(nr, text) {
     + (text ? run(': ', { bold: true }) + run(text) : ''), { style: 'Caption' });
 }
 
-// opts.layout: 2 = zwei große Fotos je Seite, 4 = vier Fotos (2 × 2) je Seite
+// Kompakter Kopf, damit auch auf Seite 1 drei Fotos Platz haben.
+function fotoKopf(objekt, anzahl) {
+  const sd = objekt.stammdaten || {};
+  const zeile = [
+    adresse(sd),
+    sd.aktenzeichen && `Az. ${sd.aktenzeichen}`,
+    sd.datum && `Besichtigung ${formatDatum(sd.datum)}`,
+    `${anzahl} Fotos`,
+  ].filter(Boolean).join(' · ');
+  return para(run('Fotodokumentation', { bold: true, size: 15 }) + run('  ' + titel(objekt), { size: 11 }), { spacingAfter: 40 })
+    + para(run(zeile, { size: 9, color: '595959' }), { spacingAfter: 160 });
+}
+
+// Drei Fotos je Seite untereinander, jede Seite beginnt mit einem neuen Dreierblock.
 export async function fotodokuDocx(objekt, fotosRaw, opts = {}, onProgress) {
-  const layout = opts.layout === 4 ? 4 : 2;
-  const gruppieren = opts.gruppieren !== false;
   const fotos = sortiereFotos(fotosRaw);
   const images = [];
-  const blocks = [];
+  let body = fotoKopf(objekt, fotos.length);
+  let fehler = 0;
   for (let i = 0; i < fotos.length; i++) {
     onProgress?.(i + 1, fotos.length);
-    const img = await prepareImage(fotos[i].blob, layout === 4 ? 1200 : 1800);
-    const rid = `rIdImg${i + 1}`;
-    images.push({ rid, name: `foto${i + 1}.jpeg`, data: img.data });
-    blocks.push({ foto: fotos[i], nr: i + 1, rid, w: img.w, h: img.h });
-  }
-
-  // In Gruppen je Kategorie aufteilen (oder eine Gruppe ohne Überschrift).
-  const gruppen = [];
-  for (const b of blocks) {
-    const kat = gruppieren ? fotoKategorie(b.foto).label : '';
-    if (!gruppen.length || gruppen.at(-1).kat !== kat) gruppen.push({ kat, items: [] });
-    gruppen.at(-1).items.push(b);
-  }
-
-  let body = kopf('Fotodokumentation', objekt, [['Anzahl Fotos', String(fotos.length)]]);
-  gruppen.forEach((g, gi) => {
-    if (g.kat) body += para(run(g.kat), { style: 'Heading1', pageBreakBefore: layout === 2 && gi > 0 });
-    if (layout === 2) {
-      for (const b of g.items) {
-        const [cx, cy] = fit(b.w, b.h, 16, 10);
-        body += para(imageRun(b.rid, b.nr, cx, cy), { align: 'center', keepNext: true, spacingAfter: 0 });
-        body += captionPara(b.nr, fotoText(b.foto));
-      }
-    } else {
-      const half = CONTENT_TW / 2;
-      const rows = [];
-      for (let i = 0; i < g.items.length; i += 2) {
-        rows.push(g.items.slice(i, i + 2).map(b => {
-          const [cx, cy] = fit(b.w, b.h, 7.6, 6.2);
-          return cell(para(imageRun(b.rid, b.nr, cx, cy), { align: 'center', keepNext: true, spacingAfter: 0 })
-            + captionPara(b.nr, fotoText(b.foto)), half);
-        }));
-        if (rows.at(-1).length === 1) rows.at(-1).push(cell('', half));
-      }
-      body += table(rows, [half, half], { borders: 'none' }) + para('', { spacingAfter: 0 });
+    const f = fotos[i];
+    const neueSeite = i > 0 && i % 3 === 0;
+    let bild;
+    try {
+      if (f.defekt) throw new Error('defekt');
+      const img = await prepareImage(f.blob, 1400);
+      const rid = `rIdImg${i + 1}`;
+      images.push({ rid, name: `foto${i + 1}.jpeg`, data: img.data });
+      const [cx, cy] = fit(img.w, img.h, 11.5, 6.2);
+      bild = imageRun(rid, i + 1, cx, cy);
+    } catch {
+      fehler++;
+      bild = run(`[Foto ${i + 1} konnte nicht geladen werden]`, { italic: true, color: 'C00000' });
     }
-  });
-  return packDocx(body, `Fotodokumentation – ${titel(objekt)}`, images, `Fotodokumentation – ${titel(objekt)}`);
+    body += para(bild, { align: 'center', keepNext: true, spacingAfter: 0, pageBreakBefore: neueSeite });
+    body += captionPara(i + 1, fotoText(f));
+  }
+  const blob = await packDocx(body, `Fotodokumentation – ${titel(objekt)}`, images, `Fotodokumentation – ${titel(objekt)}`);
+  blob.fehler = fehler;
+  return blob;
 }
 
 // ---------- Baubeschreibung ----------

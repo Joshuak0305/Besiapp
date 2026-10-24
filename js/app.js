@@ -1,13 +1,13 @@
 import * as db from './db.js';
 import {
-  STAMMDATEN, BAUBESCHREIBUNG, STANDARD_MERKMALE, MODERNISIERUNG, MODERNISIERUNGSGRAD, FOTO_KATEGORIEN, GESCHOSSE,
-  ausstattungsstandard, modernisierung, fotoKategorie, fotoText, sortiereFotos,
+  STAMMDATEN, BAUBESCHREIBUNG, STANDARD_MERKMALE, MODERNISIERUNG, MODERNISIERUNGSGRAD, FOTO_VORSCHLAEGE,
+  ausstattungsstandard, modernisierung, fotoText, sortiereFotos, vorschlagAnwenden,
 } from './schema.js';
 import * as ex from './export.js';
 import { openMarkup, freeCanvas } from './markup.js';
 
 // Wird auf der Startseite angezeigt; passt zur CACHE-Version in sw.js.
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 
 const $app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -269,20 +269,13 @@ async function processImage(file, maxEdge = 2400) {
   }
 }
 
-// Neue Fotos übernehmen Kategorie, Geschoss und Raum der letzten Auswahl.
-async function addFiles(objekt, files, vorlage = {}) {
+async function addFiles(objekt, files) {
   const existing = await db.getFotos(objekt.id);
   let order = existing.reduce((m, f) => Math.max(m, f.order), -1) + 1;
-  const neu = objekt.neueFotos || {};
   let lastId = null;
   for (const file of files) {
     const blob = await processImage(file);
-    const foto = {
-      id: db.uid(), objektId: objekt.id, order: order++, blob, caption: '', createdAt: Date.now(),
-      kategorie: vorlage.kategorie ?? neu.kategorie ?? 'aussen',
-      geschoss: vorlage.geschoss ?? neu.geschoss ?? '',
-      raum: vorlage.raum ?? '',
-    };
+    const foto = { id: db.uid(), objektId: objekt.id, order: order++, blob, caption: '', createdAt: Date.now() };
     await db.putFoto(foto);
     lastId = foto.id;
   }
@@ -290,129 +283,142 @@ async function addFiles(objekt, files, vorlage = {}) {
   return lastId;
 }
 
-function selectHtml(id, options, value, emptyLabel) {
-  return `<select id="${id}">${emptyLabel != null ? `<option value="">${esc(emptyLabel)}</option>` : ''}${options.map(([v, l]) =>
-    `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+// Vorschläge für die Beschriftung: je Gruppe eine waagerecht scrollbare Zeile.
+function vorschlagHtml(text) {
+  const teile = String(text || '').split(/\s*,\s*/).map(t => t.toLowerCase());
+  return `<div class="vorschlaege">${FOTO_VORSCHLAEGE.map(g => `
+    <div class="vrow"><span class="vtitel">${esc(g.titel)}</span><div class="vchips">${g.begriffe.map(b =>
+      `<button type="button" class="chip ${teile.includes(b.toLowerCase()) ? 'on' : ''}" data-v="${esc(b)}">${esc(b)}</button>`).join('')}</div></div>`).join('')}
+  </div>`;
+}
+
+function bindVorschlaege(panel, textarea, onChange) {
+  // Fokus im Textfeld halten, damit die Tastatur beim Antippen nicht springt.
+  panel.addEventListener('mousedown', e => { if (e.target.closest('.chip')) e.preventDefault(); });
+  panel.addEventListener('click', e => {
+    const c = e.target.closest('.chip');
+    if (!c) return;
+    textarea.value = vorschlagAnwenden(textarea.value, c.dataset.v);
+    const teile = textarea.value.split(/\s*,\s*/).map(t => t.toLowerCase());
+    panel.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', teile.includes(x.dataset.v.toLowerCase())));
+    autoGrow(textarea);
+    onChange(textarea.value);
+  });
+}
+
+function defektHtml() {
+  return '<div class="defekt-ph">⚠︎<small>Foto nicht lesbar</small></div>';
 }
 
 async function renderFotos(content, objekt) {
   const fotos = sortiereFotos(await db.getFotos(objekt.id));
   const byId = new Map(fotos.map(f => [f.id, f]));
-  objekt.neueFotos ??= { kategorie: 'aussen', geschoss: '' };
-  const nr = new Map(fotos.map((f, i) => [f.id, i + 1]));
+  const defekt = fotos.filter(f => f.defekt).length;
 
-  const item = f => {
-    const kopf = [f.geschoss, f.raum].filter(Boolean).join(', ');
-    return `<div class="fitem" data-id="${f.id}">
-      <span class="handle" aria-label="Verschieben">⠿</span>
-      <a class="fthumb" href="#/o/${objekt.id}/foto/${f.id}"><img src="${objectUrl(f.blob)}" alt="" loading="lazy"><span class="num">${nr.get(f.id)}</span></a>
-      <div class="fbody">
-        <a class="fkopf ${kopf ? '' : 'missing'}" href="#/o/${objekt.id}/foto/${f.id}">${esc(kopf || 'Raum / Geschoss wählen')} ›</a>
-        <textarea class="fcap" data-id="${f.id}" rows="1" placeholder="Beschreibung …" autocapitalize="sentences">${esc(f.caption)}</textarea>
-      </div>
-    </div>`;
-  };
+  // Ältere Fotos: Geschoss und Raum in die Beschriftung übernehmen.
+  const alt = fotos.filter(f => f.geschoss || f.raum);
+  if (alt.length) {
+    alt.forEach(f => { f.caption = fotoText(f); delete f.geschoss; delete f.raum; delete f.kategorie; });
+    await db.putFotos(alt.filter(f => !f.defekt));
+  }
 
   content.innerHTML = `
     <div class="photo-actions">
       <label class="btn primary">📷 Kamera<input type="file" accept="image/*" capture="environment" id="cam" hidden></label>
       <label class="btn">🖼️ Mediathek<input type="file" accept="image/*" multiple id="lib" hidden></label>
     </div>
-    <div class="card neu-row">
-      <span>Neue Fotos in</span>
-      ${selectHtml('neuKat', FOTO_KATEGORIEN.map(k => [k.key, k.label]), objekt.neueFotos.kategorie)}
-      ${selectHtml('neuGes', GESCHOSSE.map(g => [g, g]), objekt.neueFotos.geschoss, 'Geschoss –')}
-    </div>
-    ${fotos.length ? `
-      <div class="ftools">
-        <span class="hint">Mit ⠿ verschieben, auch in eine andere Kategorie.</span>
-        <button class="btn small" id="autosort">Nach Geschoss sortieren</button>
-      </div>
-      <div id="flists">${FOTO_KATEGORIEN.map(k => {
-        const list = fotos.filter(f => fotoKategorie(f) === k);
-        return `<section class="fgroup ${list.length ? '' : 'leer'}">
-          <h3>${esc(k.label)} <small class="cnt">${list.length}</small></h3>
-          <div class="flist" data-kat="${k.key}">${list.map(item).join('')}</div>
-        </section>`;
-      }).join('')}</div>`
-      : '<div class="empty">Noch keine Fotos.<br>Wähle oben die Kategorie, dann einfach losfotografieren.</div>'}`;
+    ${defekt ? `<div class="card warnbox">${defekt} Foto${defekt > 1 ? 's sind' : ' ist'} nicht mehr lesbar (Speicherfehler von Safari aus der Vorversion).
+      Bitte neu aufnehmen und das defekte Foto löschen. Neue Fotos werden jetzt zuverlässig gespeichert.</div>` : ''}
+    ${fotos.length ? `<p class="hint">Mit ⠿ verschieben. Beschriftung antippen und Vorschläge wählen oder frei schreiben.</p>
+      <div class="flist" id="flist">${fotos.map((f, i) => `
+        <div class="fitem ${f.defekt ? 'defekt' : ''}" data-id="${f.id}">
+          <div class="frow">
+            <span class="handle" aria-label="Verschieben">⠿</span>
+            <a class="fthumb" href="#/o/${objekt.id}/foto/${f.id}">${f.defekt ? defektHtml() : `<img src="${objectUrl(f.blob)}" alt="" loading="lazy">`}<span class="num">${i + 1}</span></a>
+            <div class="fbody">
+              ${f.defekt ? `<button type="button" class="btn small danger-inline" data-del="${f.id}">Defektes Foto löschen</button>` : ''}
+              <textarea class="fcap" data-id="${f.id}" rows="2" placeholder="Beschriftung …" autocapitalize="sentences">${esc(f.caption)}</textarea>
+            </div>
+          </div>
+          <div class="fvorschlag"></div>
+        </div>`).join('')}</div>`
+      : '<div class="empty">Noch keine Fotos.</div>'}`;
 
-  const neuKat = document.getElementById('neuKat'), neuGes = document.getElementById('neuGes');
-  neuKat.onchange = () => { objekt.neueFotos.kategorie = neuKat.value; db.putObjekt(objekt); };
-  neuGes.onchange = () => { objekt.neueFotos.geschoss = neuGes.value; db.putObjekt(objekt); };
-
-  const handle = async (input, openAfter) => {
+  const handle = async (input, scrollToNew) => {
     const files = [...input.files];
     if (!files.length) return;
     content.insertAdjacentHTML('afterbegin', '<div class="busy">Fotos werden gespeichert …</div>');
     try {
       const lastId = await addFiles(objekt, files);
-      // Nach einer Kameraaufnahme direkt zur Beschriftung springen.
-      if (openAfter && files.length === 1) location.hash = `#/o/${objekt.id}/foto/${lastId}`;
-      else route();
+      sessionStorage.setItem('aktivFoto', lastId);
+      await route();
+      if (scrollToNew) document.querySelector(`.fitem[data-id="${lastId}"]`)?.scrollIntoView({ block: 'center' });
     } catch (e) { alert('Foto konnte nicht gespeichert werden: ' + e.message); route(); }
   };
   document.getElementById('cam').onchange = e => handle(e.target, true);
   document.getElementById('lib').onchange = e => handle(e.target, false);
   if (!fotos.length) return;
 
-  // Beschreibung direkt in der Liste bearbeiten.
+  content.querySelectorAll('.fthumb img').forEach(img => img.addEventListener('error', () => {
+    img.replaceWith(Object.assign(document.createElement('div'), { className: 'defekt-ph', innerHTML: '⚠︎<small>Foto nicht lesbar</small>' }));
+  }));
+  content.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Defektes Foto löschen?')) return;
+    await db.deleteFoto(b.dataset.del);
+    route();
+  }));
+
+  // Beschriftung direkt in der Liste bearbeiten.
   const dirty = new Set();
-  const saveCaptions = debounce(() => { db.putFotos([...dirty].map(id => byId.get(id))); dirty.clear(); }, 500);
+  const saveCaptions = debounce(() => { db.putFotos([...dirty].map(id => byId.get(id)).filter(f => !f.defekt)); dirty.clear(); }, 500);
   pendingSave = saveCaptions;
+  const setCaption = (id, text) => { byId.get(id).caption = text; dirty.add(id); saveCaptions(); };
+
+  // Vorschläge erscheinen unter dem gerade bearbeiteten Foto.
+  const aktivieren = item => {
+    if (!item || item.classList.contains('aktiv')) return;
+    content.querySelectorAll('.fitem.aktiv').forEach(x => { x.classList.remove('aktiv'); x.querySelector('.fvorschlag').innerHTML = ''; });
+    item.classList.add('aktiv');
+    const ta = item.querySelector('.fcap');
+    const box = item.querySelector('.fvorschlag');
+    box.innerHTML = vorschlagHtml(ta.value) + '<button type="button" class="btn small fertig">Fertig</button>';
+    bindVorschlaege(box.querySelector('.vorschlaege'), ta, v => setCaption(ta.dataset.id, v));
+    box.querySelector('.fertig').onclick = () => {
+      item.classList.remove('aktiv'); box.innerHTML = ''; ta.blur();
+      sessionStorage.removeItem('aktivFoto');
+    };
+    sessionStorage.setItem('aktivFoto', ta.dataset.id);
+  };
+
   content.querySelectorAll('.fcap').forEach(ta => {
     autoGrow(ta);
+    ta.addEventListener('focus', () => aktivieren(ta.closest('.fitem')));
     ta.addEventListener('input', () => {
-      byId.get(ta.dataset.id).caption = ta.value;
-      dirty.add(ta.dataset.id);
+      setCaption(ta.dataset.id, ta.value);
       autoGrow(ta);
-      saveCaptions();
+      const teile = ta.value.split(/\s*,\s*/).map(t => t.toLowerCase());
+      ta.closest('.fitem').querySelectorAll('.vorschlaege .chip').forEach(x => x.classList.toggle('on', teile.includes(x.dataset.v.toLowerCase())));
     });
   });
+  aktivieren(content.querySelector(`.fitem[data-id="${sessionStorage.getItem('aktivFoto')}"]`));
 
-  // Nach dem Verschieben Kategorie und Reihenfolge aus der Anzeige übernehmen.
-  const flists = document.getElementById('flists');
+  // Nach dem Verschieben Reihenfolge und Nummern aus der Anzeige übernehmen.
+  const flist = document.getElementById('flist');
   const applyDomOrder = async () => {
-    let order = 0, n = 0;
     const changed = [];
-    flists.querySelectorAll('.flist').forEach(list => {
-      const items = list.querySelectorAll('.fitem');
-      list.parentElement.querySelector('.cnt').textContent = items.length;
-      list.parentElement.classList.toggle('leer', !items.length);
-      items.forEach(el => {
-        const f = byId.get(el.dataset.id);
-        if (f.order !== order || f.kategorie !== list.dataset.kat) {
-          f.order = order; f.kategorie = list.dataset.kat; changed.push(f);
-        }
-        order++;
-        el.querySelector('.num').textContent = ++n;
-      });
+    flist.querySelectorAll('.fitem').forEach((el, i) => {
+      const f = byId.get(el.dataset.id);
+      el.querySelector('.num').textContent = i + 1;
+      if (f.order !== i) { f.order = i; if (!f.defekt) changed.push(f); }
     });
     if (changed.length) await db.putFotos(changed);
   };
-
   if (window.Sortable) {
-    flists.querySelectorAll('.flist').forEach(list => window.Sortable.create(list, {
-      group: 'fotos', handle: '.handle', animation: 150, ghostClass: 'ghost', forceFallback: true, fallbackTolerance: 3,
-      onStart: () => flists.classList.add('dragging'),
-      onEnd: () => { flists.classList.remove('dragging'); applyDomOrder(); },
-    }));
+    window.Sortable.create(flist, {
+      handle: '.handle', animation: 150, ghostClass: 'ghost', forceFallback: true, fallbackTolerance: 3,
+      onEnd: applyDomOrder,
+    });
   }
-
-  document.getElementById('autosort').onclick = async () => {
-    const gi = f => { const i = GESCHOSSE.indexOf(f.geschoss); return i < 0 ? GESCHOSSE.length : i; };
-    const sorted = [...fotos].sort((a, b) =>
-      FOTO_KATEGORIEN.indexOf(fotoKategorie(a)) - FOTO_KATEGORIEN.indexOf(fotoKategorie(b)) || gi(a) - gi(b) || a.order - b.order);
-    sorted.forEach((f, i) => { f.order = i; });
-    saveCaptions.flush();
-    await db.putFotos(sorted);
-    toast('Nach Kategorie und Geschoss sortiert');
-    route();
-  };
-}
-
-function singleChips(values, current) {
-  return values.map(v => `<button type="button" class="chip ${v === current ? 'on' : ''}" data-v="${esc(v)}">${esc(v)}</button>`).join('');
 }
 
 async function renderFoto(objekt, fotoId) {
@@ -421,28 +427,21 @@ async function renderFoto(objekt, fotoId) {
   if (idx < 0) { location.hash = `#/o/${objekt.id}/fotos`; return; }
   const foto = fotos[idx];
   const back = `#/o/${objekt.id}/fotos`;
-  const save = debounce(() => db.putFoto(foto));
+  const save = debounce(() => { if (!foto.defekt) db.putFoto(foto); });
   pendingSave = save;
-  const kat = () => fotoKategorie(foto);
 
   $app.innerHTML = `
     ${header(`Foto ${idx + 1} von ${fotos.length}`, { back })}
     <main class="page foto-edit">
-      <div class="photo-view"><img src="${objectUrl(foto.blob)}" alt=""></div>
-      <p class="preview" id="preview"></p>
+      <div class="photo-view">${foto.defekt ? defektHtml() : `<img src="${objectUrl(foto.blob)}" alt="">`}</div>
       <section class="card form">
-        <div class="field"><label>Kategorie</label><div class="chips" id="katChips">${FOTO_KATEGORIEN.map(k =>
-          `<button type="button" class="chip ${k === kat() ? 'on' : ''}" data-v="${k.key}">${esc(k.label)}</button>`).join('')}</div></div>
-        <div class="field"><label>Geschoss</label><div class="chips" id="gesChips">${singleChips(GESCHOSSE, foto.geschoss)}</div></div>
-        <div class="field"><label for="raum">Raum / Ansicht / Bauteil</label>
-          <input id="raum" value="${esc(foto.raum)}" placeholder="z. B. Küche" autocapitalize="sentences">
-          <div class="chips" id="raumChips">${singleChips(kat().raeume, foto.raum)}</div></div>
-        <div class="field"><label for="cap">Beschreibung</label>
-          <textarea id="cap" rows="2" placeholder="z. B. Einbauküche, Fliesenspiegel" autocapitalize="sentences">${esc(foto.caption)}</textarea></div>
+        <div class="field"><label for="cap">Beschriftung</label>
+          <textarea id="cap" rows="2" placeholder="z. B. EG, Küche, Einbauküche" autocapitalize="sentences">${esc(fotoText(foto))}</textarea>
+          <div id="vbox">${vorschlagHtml(fotoText(foto))}</div></div>
       </section>
       <label class="btn primary wide">📷 Nächstes Foto aufnehmen<input type="file" accept="image/*" capture="environment" id="camNext" hidden></label>
       <div class="btn-row">
-        <button class="btn" id="mark">✏️ Markieren</button>
+        <button class="btn" id="mark" ${foto.defekt ? 'disabled' : ''}>✏️ Markieren</button>
         ${foto.original ? '<button class="btn" id="orig">↺ Original</button>' : ''}
       </div>
       <div class="btn-row">
@@ -452,52 +451,22 @@ async function renderFoto(objekt, fotoId) {
       <button class="btn danger" id="del">Foto löschen</button>
     </main>`;
 
-  const preview = document.getElementById('preview');
-  const raum = document.getElementById('raum');
   const cap = document.getElementById('cap');
-  const updatePreview = () => {
-    const t = fotoText(foto);
-    preview.innerHTML = `<b>Foto ${idx + 1}</b>${t ? ': ' + esc(t) : ' <span class="muted">(ohne Beschriftung)</span>'}`;
-  };
-  const changed = () => { updatePreview(); save(); };
-  updatePreview();
+  if (foto.geschoss || foto.raum) { foto.caption = cap.value; delete foto.geschoss; delete foto.raum; delete foto.kategorie; save(); }
   autoGrow(cap);
-
-  // Kategorie und Geschoss gelten auch als Vorgabe für die nächsten Fotos.
-  const remember = () => {
-    objekt.neueFotos = { kategorie: kat().key, geschoss: foto.geschoss || '' };
-    db.putObjekt(objekt);
-  };
-
-  document.getElementById('katChips').addEventListener('click', e => {
-    const c = e.target.closest('.chip'); if (!c) return;
-    foto.kategorie = c.dataset.v;
-    e.currentTarget.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
-    document.getElementById('raumChips').innerHTML = singleChips(kat().raeume, foto.raum);
-    remember(); changed();
+  const setText = v => { foto.caption = v; save(); };
+  cap.addEventListener('input', () => {
+    setText(cap.value); autoGrow(cap);
+    const teile = cap.value.split(/\s*,\s*/).map(t => t.toLowerCase());
+    document.querySelectorAll('#vbox .chip').forEach(x => x.classList.toggle('on', teile.includes(x.dataset.v.toLowerCase())));
   });
-  document.getElementById('gesChips').addEventListener('click', e => {
-    const c = e.target.closest('.chip'); if (!c) return;
-    foto.geschoss = foto.geschoss === c.dataset.v ? '' : c.dataset.v;
-    e.currentTarget.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x.dataset.v === foto.geschoss));
-    remember(); changed();
-  });
-  const raumChips = document.getElementById('raumChips');
-  const syncRaumChips = () => raumChips.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x.dataset.v === foto.raum));
-  raumChips.addEventListener('click', e => {
-    const c = e.target.closest('.chip'); if (!c) return;
-    foto.raum = foto.raum === c.dataset.v ? '' : c.dataset.v;
-    raum.value = foto.raum;
-    syncRaumChips(); changed();
-  });
-  raum.addEventListener('input', () => { foto.raum = raum.value; syncRaumChips(); changed(); });
-  cap.addEventListener('input', () => { foto.caption = cap.value; autoGrow(cap); changed(); });
+  bindVorschlaege(document.querySelector('#vbox .vorschlaege'), cap, setText);
 
   document.getElementById('camNext').onchange = async e => {
     const files = [...e.target.files];
     if (!files.length) return;
     save.flush();
-    const id = await addFiles(objekt, files, { kategorie: kat().key, geschoss: foto.geschoss || '' });
+    const id = await addFiles(objekt, files);
     location.hash = `#/o/${objekt.id}/foto/${id}`;
   };
 
@@ -722,15 +691,11 @@ async function renderExport(content, objekt, save) {
   const felder = groups.reduce((n, g) => n + g.rows.length, 0);
   const st = ausstattungsstandard(objekt);
   const mo = modernisierung(objekt);
-  const opts = objekt.exportOpts ??= { layout: 2, gruppieren: true };
 
   content.innerHTML = `
     <section class="card export">
       <h2>Fotodokumentation</h2>
-      <p>${fotos.length} Foto${fotos.length === 1 ? '' : 's'}${ohneText ? ` · <span class="warn">${ohneText} ohne Beschriftung</span>` : ''}</p>
-      <div class="opt-row"><span>Layout</span>
-        <div class="seg" id="layout"><button type="button" data-v="2" class="${opts.layout !== 4 ? 'on' : ''}">2 je Seite</button><button type="button" data-v="4" class="${opts.layout === 4 ? 'on' : ''}">4 je Seite</button></div></div>
-      <label class="opt-row"><span>Nach Kategorien gliedern</span><input type="checkbox" id="grp" ${opts.gruppieren !== false ? 'checked' : ''}></label>
+      <p>${fotos.length} Foto${fotos.length === 1 ? '' : 's'} · 3 Fotos je Seite${ohneText ? ` · <span class="warn">${ohneText} ohne Beschriftung</span>` : ''}</p>
       <button class="btn primary" id="docFoto" ${fotos.length ? '' : 'disabled'}>Word-Datei erstellen</button>
       <div class="result" id="resFoto"></div>
     </section>
@@ -748,14 +713,6 @@ async function renderExport(content, objekt, save) {
       <div class="result" id="resBackup"></div>
     </section>
     <button class="btn danger" id="delObj">Objekt löschen</button>`;
-
-  document.getElementById('layout').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    opts.layout = Number(b.dataset.v);
-    e.currentTarget.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-    save();
-  });
-  document.getElementById('grp').onchange = e => { opts.gruppieren = e.target.checked; save(); };
 
   // iOS erlaubt den Teilen-Dialog nur direkt nach einem Tippen. Deshalb wird
   // zuerst erzeugt und dann ein eigener Button zum Teilen angezeigt.
@@ -776,8 +733,11 @@ async function renderExport(content, objekt, save) {
 
   document.getElementById('docFoto').onclick = e => {
     const res = document.getElementById('resFoto');
-    run(e.currentTarget, res, () => ex.fotodokuDocx(objekt, fotos, opts, (i, n) => { res.textContent = `Foto ${i} von ${n} …`; }),
-      ex.dateiname(objekt, 'Fotodokumentation'));
+    run(e.currentTarget, res, async () => {
+      const blob = await ex.fotodokuDocx(objekt, fotos, {}, (i, n) => { res.textContent = `Foto ${i} von ${n} …`; });
+      if (blob.fehler) setTimeout(() => res.insertAdjacentHTML('beforeend', `<span class="warn">${blob.fehler} Foto${blob.fehler > 1 ? 's' : ''} nicht lesbar – im Dokument als Hinweis vermerkt.</span>`), 0);
+      return blob;
+    }, ex.dateiname(objekt, 'Fotodokumentation'));
   };
   document.getElementById('docBau').onclick = e =>
     run(e.currentTarget, document.getElementById('resBau'), () => ex.baubeschreibungDocx(objekt), ex.dateiname(objekt, 'Baubeschreibung'));

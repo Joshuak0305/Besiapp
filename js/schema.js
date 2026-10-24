@@ -451,37 +451,39 @@ export function modernisierung(objekt) {
 }
 
 // ---------------------------------------------------------------------------
-// Fotos: Kategorien, Geschosse und Raumvorschläge
+// Fotos: Vorschläge für die Beschriftung
 // ---------------------------------------------------------------------------
-export const FOTO_KATEGORIEN = [
-  { key: 'aussen', label: 'Außenansichten',
-    raeume: ['Straßenansicht', 'Ansicht von Norden', 'Ansicht von Osten', 'Ansicht von Süden', 'Ansicht von Westen', 'Gartenansicht', 'Eingangsbereich', 'Fassade', 'Dach', 'Sockel'] },
-  { key: 'innen', label: 'Innenräume',
-    raeume: ['Diele', 'Flur', 'Wohnzimmer', 'Esszimmer', 'Küche', 'Schlafzimmer', 'Kinderzimmer', 'Arbeitszimmer', 'Badezimmer', 'Duschbad', 'Gäste-WC', 'Abstellraum', 'Hauswirtschaftsraum', 'Treppenhaus', 'Kellerraum', 'Dachboden', 'Spitzboden', 'Dachstuhl'] },
-  { key: 'technik', label: 'Haustechnik',
-    raeume: ['Heizungsanlage', 'Warmwasserspeicher', 'Hausanschlüsse', 'Zählerschrank', 'Elektroverteilung', 'Lüftungsanlage', 'Photovoltaikanlage', 'Wechselrichter'] },
-  { key: 'aussenanlagen', label: 'Außenanlagen und Nebengebäude',
-    raeume: ['Garage', 'Carport', 'Stellplatz', 'Zufahrt', 'Terrasse', 'Balkon', 'Garten', 'Gartenhaus', 'Einfriedung'] },
-  { key: 'maengel', label: 'Baumängel und Bauschäden',
-    raeume: ['Feuchtigkeit', 'Schimmel', 'Riss', 'Putzschaden', 'Ausblühungen', 'Undichtigkeit', 'Holzschaden', 'Abplatzung', 'Korrosion'] },
-  { key: 'sonstiges', label: 'Sonstiges', raeume: [] },
-];
-
 export const GESCHOSSE = ['KG', 'EG', 'OG', '1. OG', '2. OG', 'DG', 'Spitzboden'];
 
-export function fotoKategorie(f) {
-  return FOTO_KATEGORIEN.find(k => k.key === f.kategorie) || FOTO_KATEGORIEN.at(-1);
+export const FOTO_VORSCHLAEGE = [
+  { titel: 'Geschoss', begriffe: GESCHOSSE, geschoss: true },
+  { titel: 'Außen', begriffe: ['Straßenansicht', 'Ansicht von Norden', 'Ansicht von Osten', 'Ansicht von Süden', 'Ansicht von Westen', 'Gartenansicht', 'Eingangsbereich', 'Fassade', 'Dach', 'Sockel'] },
+  { titel: 'Räume', begriffe: ['Diele', 'Flur', 'Wohnzimmer', 'Esszimmer', 'Küche', 'Schlafzimmer', 'Kinderzimmer', 'Arbeitszimmer', 'Badezimmer', 'Duschbad', 'Gäste-WC', 'Abstellraum', 'Hauswirtschaftsraum', 'Treppenhaus', 'Kellerraum', 'Dachboden', 'Dachstuhl'] },
+  { titel: 'Technik', begriffe: ['Heizungsanlage', 'Warmwasserspeicher', 'Hausanschlüsse', 'Zählerschrank', 'Elektroverteilung', 'Lüftungsanlage', 'Photovoltaikanlage'] },
+  { titel: 'Anlagen', begriffe: ['Garage', 'Carport', 'Stellplatz', 'Zufahrt', 'Terrasse', 'Balkon', 'Garten', 'Gartenhaus', 'Einfriedung'] },
+  { titel: 'Mängel', begriffe: ['Feuchtigkeit', 'Schimmel', 'Riss', 'Putzschaden', 'Ausblühungen', 'Undichtigkeit', 'Holzschaden', 'Abplatzung', 'Korrosion'] },
+];
+
+// Fügt einen Vorschlag in die Beschriftung ein oder entfernt ihn wieder.
+// Geschosse stehen immer vorne und schließen sich gegenseitig aus.
+export function vorschlagAnwenden(text, begriff) {
+  const teile = String(text || '').split(/\s*,\s*/).map(t => t.trim()).filter(Boolean);
+  const idx = teile.findIndex(t => t.toLowerCase() === begriff.toLowerCase());
+  if (idx >= 0) { teile.splice(idx, 1); return teile.join(', '); }
+  if (GESCHOSSE.includes(begriff)) {
+    const ohne = teile.filter(t => !GESCHOSSE.includes(t));
+    return [begriff, ...ohne].join(', ');
+  }
+  return [...teile, begriff].join(', ');
 }
 
-// Reihenfolge für die Nummerierung: nach Kategorie, innerhalb nach eigener Sortierung.
 export function sortiereFotos(fotos) {
-  const idx = f => FOTO_KATEGORIEN.indexOf(fotoKategorie(f));
-  return [...fotos].sort((a, b) => idx(a) - idx(b) || a.order - b.order);
+  return [...fotos].sort((a, b) => a.order - b.order);
 }
 
-// Beschriftung, wie sie im Dokument erscheint, z. B. „EG, Küche: Einbauküche“.
+// Beschriftung im Dokument. Ältere Fotos hatten Geschoss und Raum getrennt erfasst.
 export function fotoText(f) {
-  const kopf = [f.geschoss, f.raum].filter(Boolean).join(', ');
+  const alt = [f.geschoss, f.raum].filter(Boolean).join(', ');
   const text = (f.caption || '').trim();
-  return kopf && text ? `${kopf}: ${text}` : kopf || text;
+  return alt && text ? `${alt}, ${text}` : alt || text;
 }

@@ -46,13 +46,44 @@ export async function deleteObjekt(id) {
   await tx('objekte', 'readwrite', s => s.delete(id));
 }
 
-export async function getFotos(objektId) {
-  const list = await tx('fotos', 'readonly', s => s.index('objektId').getAll(objektId));
-  return list.sort((a, b) => a.order - b.order);
+// Fotos werden als ArrayBuffer gespeichert, nicht als Blob: Safari auf iOS verliert
+// in Web-Apps gelegentlich die Daten gespeicherter Blobs (Bild zeigt dann "?").
+async function packBild(b) {
+  if (!(b instanceof Blob)) return b ?? null;
+  return { buf: await b.arrayBuffer(), type: b.type || 'image/jpeg' };
 }
-export const getFoto = id => tx('fotos', 'readonly', s => s.get(id));
-export const putFoto = f => tx('fotos', 'readwrite', s => s.put(f));
-export const putFotos = list => tx('fotos', 'readwrite', s => list.forEach(f => s.put(f)));
+function unpackBild(b) {
+  return b && b.buf ? new Blob([b.buf], { type: b.type }) : b ?? null;
+}
+async function pack(f) {
+  return { ...f, blob: await packBild(f.blob), original: await packBild(f.original), defekt: undefined };
+}
+function unpack(f) {
+  return f && { ...f, blob: unpackBild(f.blob), original: unpackBild(f.original) };
+}
+
+// Ältere Einträge mit Blob einmalig umwandeln; nicht mehr lesbare werden als defekt markiert.
+async function migriere(list) {
+  const neu = [];
+  for (const f of list) {
+    if (!(f.blob instanceof Blob) && !(f.original instanceof Blob)) continue;
+    try {
+      neu.push(await pack(f));
+    } catch {
+      f.defekt = true;
+    }
+  }
+  if (neu.length) await tx('fotos', 'readwrite', s => neu.forEach(f => s.put(f)));
+  return list;
+}
+
+export async function getFotos(objektId) {
+  const list = await migriere(await tx('fotos', 'readonly', s => s.index('objektId').getAll(objektId)));
+  return list.map(unpack).sort((a, b) => a.order - b.order);
+}
+export const getFoto = async id => unpack((await migriere([await tx('fotos', 'readonly', s => s.get(id))].filter(Boolean)))[0]);
+export const putFoto = async f => { const p = await pack(f); return tx('fotos', 'readwrite', s => s.put(p)); };
+export const putFotos = async list => { const p = await Promise.all(list.map(pack)); return tx('fotos', 'readwrite', s => p.forEach(f => s.put(f))); };
 export const deleteFoto = id => tx('fotos', 'readwrite', s => s.delete(id));
 
 export async function countFotos(objektId) {
@@ -76,6 +107,7 @@ export async function exportBackup(objektId) {
   const enc = blob => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
   const fotosOut = [];
   for (const f of fotos) {
+    if (f.defekt) continue;
     fotosOut.push({ ...f, blob: await enc(f.blob), original: f.original ? await enc(f.original) : null });
   }
   return { format: 'besichtigung-backup', version: 1, objekt, fotos: fotosOut };
