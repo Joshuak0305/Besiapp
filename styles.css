@@ -315,3 +315,4 @@ details.std .val { font-weight: 700; font-size: 17px; min-width: 28px; text-alig
 .opt-row.pad small { font-size: 12px; }
 .stufe b { white-space: nowrap; }
 .stufen.pad .stufe b { min-width: 46px; }
+.version { text-align: center; color: var(--muted); font-size: 12px; margin-top: 28px; }
