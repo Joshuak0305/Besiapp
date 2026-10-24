@@ -1,11 +1,12 @@
 // Hält die App offline verfügbar: alle Dateien werden beim ersten Start
 // zwischengespeichert. Nach Änderungen an der App CACHE hochzählen.
-const CACHE = 'besichtigung-v1';
+const CACHE = 'besichtigung-v4';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/schema.js', 'js/export.js', 'js/markup.js',
   'icons/icon.svg', 'icons/apple-touch-icon.png', 'icons/icon-512.png',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js',
 ];
 
 self.addEventListener('install', e => {
