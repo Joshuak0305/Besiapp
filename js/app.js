@@ -6,6 +6,9 @@ import {
 import * as ex from './export.js';
 import { openMarkup, freeCanvas } from './markup.js';
 
+// Wird auf der Startseite angezeigt; passt zur CACHE-Version in sw.js.
+const APP_VERSION = 5;
+
 const $app = document.getElementById('app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const thumbUrls = new Set();
@@ -91,6 +94,7 @@ async function renderHome() {
       ${cards.length ? `<div class="list">${cards.join('')}</div>`
         : `<div class="empty">Noch keine Objekte.<br>Lege eine neue Besichtigung an.</div>`}
       <input type="file" id="impfile" accept=".json,application/json" hidden>
+      <p class="version">Version ${APP_VERSION}</p>
     </main>`;
 
   document.getElementById('neu').onclick = async () => {
