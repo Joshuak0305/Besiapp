@@ -1,7 +1,7 @@
 // Hält die App offline verfügbar: alle Dateien werden beim ersten Start
-// zwischengespeichert. Nach Änderungen an der App CACHE hochzählen.
+// zwischengespeichert.
 // Bei jedem Update erhöhen – auch APP_VERSION in js/app.js anpassen.
-const CACHE = 'besichtigung-v5';
+const CACHE = 'besichtigung-v6';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/schema.js', 'js/export.js', 'js/markup.js',

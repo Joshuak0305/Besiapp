@@ -21,13 +21,11 @@ und kostenlos geht das mit **GitHub Pages**:
 ## Ablauf bei einer Besichtigung
 
 1. **Objekt**: Adresse, Aktenzeichen, Besichtigungsdatum, ggf. Wertermittlungsstichtag.
-2. **Fotos**: Oben „Neue Fotos in“ die Kategorie und das Geschoss wählen, dann *Kamera*.
-   Nach jeder Aufnahme öffnet sich die Beschriftung: Raum antippen, Beschreibung tippen oder diktieren.
-   *Nächstes Foto aufnehmen* übernimmt Kategorie und Geschoss.
-   - In der Fotoliste kannst du die Beschreibung direkt bearbeiten und mit ⠿ verschieben,
-     auch in eine andere Kategorie. Die Nummerierung passt sich automatisch an.
-   - *Nach Geschoss sortieren* ordnet innerhalb jeder Kategorie nach KG, EG, OG, DG …
-   - *Markieren* zeichnet Pfeile, Kreise oder Freihandlinien ein. Das Original bleibt erhalten.
+2. **Fotos**: *Kamera* antippen. Nach der Aufnahme springt die Liste zum neuen Foto und zeigt die Vorschläge
+   (Geschoss, Außen, Räume, Technik, Anlagen, Mängel). Antippen fügt den Begriff ein, nochmal antippen entfernt ihn.
+   Geschosse stehen immer vorne. Frei schreiben oder diktieren geht jederzeit.
+   - Mit ⠿ verschieben, die Nummerierung passt sich automatisch an.
+   - Foto antippen öffnet die Großansicht mit *Markieren* (Pfeil, Kreis, Stift) und *Nächstes Foto aufnehmen*.
 3. **Baubeschreibung**: Begriffe antippen (nochmal tippen entfernt sie) oder frei schreiben.
 4. **Bewertung**:
    - *Ausstattungsstandard*: wird automatisch aus den Begriffen der Baubeschreibung ermittelt
@@ -44,7 +42,7 @@ und kostenlos geht das mit **GitHub Pages**:
    - *Restnutzungsdauer*: modifiziert nach Anlage 2 ImmoWertV aus Baujahr, Gesamtnutzungsdauer
      (Standard 80 Jahre) und Modernisierungspunkten. Eigener Wert möglich.
 5. **Export**: *Word-Datei erstellen* → *teilen / sichern* (in Dateien, per Mail, AirDrop).
-   - Fotodokumentation: 2 oder 4 Fotos je Seite, wahlweise nach Kategorien gegliedert.
+   - Fotodokumentation: 3 Fotos je Seite untereinander mit „Foto 1: …“.
      Die Fotonummern sind Word-Felder: Nach Umsortieren in Word mit *Alles markieren → F9* aktualisieren.
    - Baubeschreibung: alle Angaben, Ausstattungsstandard mit Begründung, Modernisierung und RND.
 
